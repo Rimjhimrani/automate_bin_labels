@@ -128,11 +128,11 @@ def parse_location_string(location_str):
     return location_parts
 
 
-def extract_location_data_from_excel(row_data):
+def extract_location_data_from_excel(row_data, active_model_label=''):
     """
     Returns 7 values for Line Location cells:
-    [Station No, Rack, Rack 1st digit, Rack 2nd digit, Level, Cell, blank]
-    Bus Model removed from slot 0 — it was incorrectly there before.
+    [Active Bus Model, Station No, Rack, Rack 1st digit, Rack 2nd digit, Level, Cell]
+    Slot 0 = the bus model that has a qty/veh value (passed in as active_model_label).
     Uses case-insensitive key matching.
     """
     if hasattr(row_data, 'to_dict'):
@@ -154,13 +154,13 @@ def extract_location_data_from_excel(row_data):
         return default
 
     return [
+        active_model_label,
         find_val(['Station No', 'Station_No', 'STATIONNO']),
         find_val(['Rack', 'RACK']),
         find_val(['Rack No (1st digit)', 'Rack_No_1st', 'RACK_NO_1ST', 'Rack No 1st digit']),
         find_val(['Rack No (2nd digit)', 'Rack_No_2nd', 'RACK_NO_2ND', 'Rack No 2nd digit']),
         find_val(['Level', 'LEVEL']),
         find_val(['Cell', 'CELL']),
-        '',
     ]
 
 
@@ -320,6 +320,9 @@ def generate_sticker_labels(excel_file_path, output_pdf_path, status_callback=No
 
         # ── QR code ──────────────────────────────────────────────────────────
         qty_veh_str = ", ".join(f"{k}:{v}" for k, v in mtm_quantities.items() if v)
+        # Active model = first model that has a qty/veh (used in Line Location slot 0)
+        active_model_label = next((k for k, v in mtm_quantities.items() if v), "")
+
         qr_data  = (f"Part No: {part_no}\nDescription: {desc}\n"
                     f"Location: {location_str}\nStore Location: {store_location}\n"
                     f"QTY/VEH: {qty_veh_str}\nQTY/BIN: {qty_bin}")
@@ -357,7 +360,7 @@ def generate_sticker_labels(excel_file_path, output_pdf_path, status_callback=No
         for label_text, values_fn in [
             ("Store Location", lambda r=row_orig_dict: extract_store_location_data_from_excel(r)),
             # Pass original-cased row so extract_location_data_from_excel builds its own uppercase lookup
-            ("Line Location",  lambda r=row_orig.to_dict(): extract_location_data_from_excel(r)),
+            ("Line Location",  lambda r=row_orig.to_dict(), m=active_model_label: extract_location_data_from_excel(r, m)),
         ]:
             loc_values = values_fn()
 
