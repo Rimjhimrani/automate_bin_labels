@@ -129,34 +129,59 @@ def parse_location_string(location_str):
 
 
 def extract_location_data_from_excel(row_data):
-    available_cols = list(row_data.index) if hasattr(row_data, 'index') else []
+    """
+    Returns 7 values for Line Location cells:
+    [Station No, Rack, Rack 1st digit, Rack 2nd digit, Level, Cell, blank]
+    Bus Model removed from slot 0 — it was incorrectly there before.
+    Uses case-insensitive key matching.
+    """
+    if hasattr(row_data, 'to_dict'):
+        raw = row_data.to_dict()
+    else:
+        raw = dict(row_data)
+    upper_lookup = {str(k).upper(): v for k, v in raw.items()}
 
     def find_val(possible_names, default=''):
         for name in possible_names:
-            if name in row_data:
-                v = row_data[name]
-                return str(v) if pd.notna(v) and str(v).lower() != 'nan' else default
-            for col in available_cols:
-                if isinstance(col, str) and col.upper() == name.upper():
-                    v = row_data[col]
-                    return str(v) if pd.notna(v) and str(v).lower() != 'nan' else default
+            v = upper_lookup.get(name.upper())
+            if v is not None and pd.notna(v) and str(v).strip().lower() not in ('', 'nan'):
+                raw_str = str(v).strip()
+                try:
+                    f = float(raw_str)
+                    return str(int(f)) if f == int(f) else raw_str
+                except (ValueError, TypeError):
+                    return raw_str
         return default
 
     return [
-        find_val(['Bus Model', 'Bus model', 'BUS MODEL', 'BUSMODEL', 'Bus_Model']),
-        find_val(['Station No', 'Station no', 'STATION NO', 'STATIONNO', 'Station_No']),
-        find_val(['Rack', 'RACK', 'rack']),
-        find_val(['Rack No (1st digit)', 'RACK NO (1st digit)', 'Rack_No_1st', 'RACK_NO_1ST']),
-        find_val(['Rack No (2nd digit)', 'RACK NO (2nd digit)', 'Rack_No_2nd', 'RACK_NO_2ND']),
-        find_val(['Level', 'LEVEL', 'level']),
-        find_val(['Cell', 'CELL', 'cell']),
+        find_val(['Station No', 'Station_No', 'STATIONNO']),
+        find_val(['Rack', 'RACK']),
+        find_val(['Rack No (1st digit)', 'Rack_No_1st', 'RACK_NO_1ST', 'Rack No 1st digit']),
+        find_val(['Rack No (2nd digit)', 'Rack_No_2nd', 'RACK_NO_2ND', 'Rack No 2nd digit']),
+        find_val(['Level', 'LEVEL']),
+        find_val(['Cell', 'CELL']),
+        '',
     ]
 
 
 def extract_store_location_data_from_excel(row_data):
+    """Case-insensitive lookup for ABB store location columns."""
+    if hasattr(row_data, 'to_dict'):
+        raw = row_data.to_dict()
+    else:
+        raw = dict(row_data)
+    upper_lookup = {str(k).upper(): v for k, v in raw.items()}
+
     def get(key, default=''):
-        v = row_data.get(key, default)
-        return str(v) if pd.notna(v) and str(v).lower() != 'nan' else default
+        v = upper_lookup.get(key.upper())
+        if v is None or not pd.notna(v) or str(v).strip().lower() in ('', 'nan'):
+            return default
+        raw_str = str(v).strip()
+        try:
+            f = float(raw_str)
+            return str(int(f)) if f == int(f) else raw_str
+        except (ValueError, TypeError):
+            return raw_str
 
     return [
         get('ABB ZONE', ''),
@@ -331,14 +356,10 @@ def generate_sticker_labels(excel_file_path, output_pdf_path, status_callback=No
 
         for label_text, values_fn in [
             ("Store Location", lambda r=row_orig_dict: extract_store_location_data_from_excel(r)),
-            ("Line Location",  lambda r=row_upper.to_dict(): extract_location_data_from_excel(r)),
+            # Pass original-cased row so extract_location_data_from_excel builds its own uppercase lookup
+            ("Line Location",  lambda r=row_orig.to_dict(): extract_location_data_from_excel(r)),
         ]:
             loc_values = values_fn()
-            # clean up "10.0" style floats
-            loc_values = [
-                str(int(float(v))) if isinstance(v, str) and re.match(r'^\d+\.0$', v) else v
-                for v in loc_values
-            ]
 
             lbl = Paragraph(label_text, ParagraphStyle(
                 name=label_text.replace(" ", ""), fontName='Helvetica-Bold',
